@@ -18,13 +18,7 @@ Notice: Cuda is enabled for default settings.
 We have three datasets for experiments, namely German Credit, Recidivism, and Credit Defaulter. 
 
 
-For fast mode, run
-
-```
-python effectiveness_fast_mode.py
-```
-
-Or run
+Run
 
 ```
 ./effectiveness.sh
