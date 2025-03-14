@@ -1,6 +1,6 @@
 # Certified Defense on the Fairness of Graph Neural Networks
 
-This is the open-source code for submission "Certified Defense on the Fairness of Graph Neural Networks".
+This is the open-source code for "Certified Defense on the Fairness of Graph Neural Networks".
 
 
 
