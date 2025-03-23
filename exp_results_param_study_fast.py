@@ -3,7 +3,8 @@ import fnmatch
 import pandas as pd
 import numpy as np
 import numba as nb
-from certify_K import certify_K
+# from certify_K import certify_K
+from certify_K_fast import certify_K
 from operator import itemgetter
 # from scipy.special import comb, factorial
 from time import time
