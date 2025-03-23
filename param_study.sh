@@ -45,4 +45,5 @@ do
     done
 done
 
-python exp_results_param_study.py
+# python exp_results_param_study.py
+python exp_results_param_study_fast.py
