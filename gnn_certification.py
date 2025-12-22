@@ -2,8 +2,6 @@ from __future__ import division
 from __future__ import print_function
 
 import os
-# os.environ["CUDA_VISIBLE_DEVICES"] = "5"
-
 import json
 from torch_geometric.utils import convert
 import time
@@ -51,8 +49,6 @@ parser.add_argument('--cuda', action='store_true', default=True,
                     help='Disable CUDA training.')
 parser.add_argument('--seed', type=int, default=1, help='Random seed.')
 parser.add_argument("--batch", type=int, default=10000, help="batch size")
-parser.add_argument('--prob', default=0.8, type=float,
-                    help="probability to keep the status for each binary entry")
 parser.add_argument('--beta', default=0.0, type=float,
                     help="propagation factor")
 parser.add_argument("--predictfile", type=str, default="predictfile", help="output prediction file")
@@ -62,18 +58,20 @@ parser.add_argument("--N0", type=int, default=10)
 parser.add_argument("--N", type=int, default=200, help="number of samples to use")
 parser.add_argument("--alpha", type=float, default=0.3, help="failure probability")
 parser.add_argument("--certifyfile", type=str, default="2certifyfile", help="output certified file")
-parser.add_argument('--dataset', type=str, default="credit", help='credit german bail google')
-parser.add_argument("--gnn", type=str, default='jk', help="a GNN in jk, gcn, sage, and gin")  
-parser.add_argument("--threshold", type=float, default=1e5, help="threshold to certify fairness")
+parser.add_argument("--threshold", type=float, default=1e5, help="initialized threshold to certify fairness")
 parser.add_argument("--threshold_flag", type=str, default='parity', help="parity or equality")
 parser.add_argument("--test_ratio", type=float, default=0.9, help="from 0 to 1")
 parser.add_argument("--sample_times", type=int, default=100, help="sample how many sets of nodes out of test set for certificatio")
 parser.add_argument("--num_x", type=int, default=150, help="number of samples to use for inner x loop")
-parser.add_argument("--gaussian_std", type=float, default=1e3, help="Gaussian std to use for inner x loop")
-parser.add_argument("--training_noise_adj_std", type=float, default=0.0002, help="Change prob in adj matrix during training process")
-parser.add_argument("--training_noise_x_std", type=float, default=2e-5, help="Change prob in adj matrix during training process")
+parser.add_argument('--dataset', type=str, default="german", help='credit german bail google')
+parser.add_argument("--gnn", type=str, default='gcn', help="a GNN in jk, gcn, and sage")  
+parser.add_argument('--prob', default=0.6, type=float, help="probability to keep the status for each binary entry")
+parser.add_argument("--gaussian_std", type=float, default=5e0, help="Gaussian std to use for inner x loop")
+parser.add_argument("--training_noise_x_std", type=float, default=0.0, help="Change prob in adj matrix during training process")
 parser.add_argument("--vul_ratio", type=float, default=0.01, help="vulnerable node ratio in the selected set")
 parser.add_argument("--grid_num", type=int, default=0, help="number of grid times")
+
+
 
 
 
@@ -95,35 +93,6 @@ def feature_norm(features):
     max_values = features.max(axis=0)[0]
     return 2*(features - min_values).div(max_values-min_values) - 1
 
-
-def noise_adding(adj):
-    adj = sparse_mx_to_torch_sparse_tensor(adj).to(device='cuda')
-
-
-    if args.cuda:
-        adj = adj.to_dense().int().clone().detach().cuda()
-    else:
-        adj = adj.to_dense().int().clone().detach()
-
-
-    if args.cuda:
-        m = Bernoulli(torch.tensor([args.training_noise_adj_std]).cuda())
-    else:
-        m = Bernoulli(torch.tensor([args.training_noise_adj_std]))
-
-    random_noise = m.sample(adj.shape).squeeze(-1).int()
-    adj_noise = torch.logical_xor(adj, random_noise).int()
-    adj_noise = adj_noise.triu() + adj_noise.triu(1).transpose(0, 1)
-    coo = adj_noise.to_sparse().coalesce()
-
-    adj_noise_coo = sp.sparse.coo_matrix((coo.values().cpu().numpy(),
-                            (coo.indices().cpu().numpy()[0], coo.indices().cpu().numpy()[1])),
-                           shape=adj_noise.shape)
-
-    del adj_noise
-    del adj
-
-    return adj_noise_coo
 
 
 def filtering(adj, features, labels, idx_train, idx_val, idx_test, sens):
@@ -168,9 +137,22 @@ def certify():
 
     print("CHECK   num of VUL  : "  + str(int(torch.randperm(int(idx_test.shape[0]))[:int(idx_test.shape[0] * args.test_ratio)].shape[0] * args.vul_ratio)))
 
+    labels_esti_path = './labels_esti.pt'  # necessary when args.threshold_flag == 'equality'
 
-    num_class, dim = labels.max().item() + 1, features.shape[1]
-    smoothed_classifier = Smooth_Ber(model, num_class, dim, args.prob, sparse_mx_to_torch_sparse_tensor(adj).cuda(), features, args.cuda, labels)
+    if os.path.exists(labels_esti_path):
+        labels_esti = torch.load(labels_esti_path)
+        if args.cuda:
+            labels_esti = labels_esti.cuda()
+    else:
+        if args.threshold_flag == "equality":
+            raise RuntimeError(
+                "labels_esti.pt not found, but threshold_flag is set to 'equality'. ")
+        else:
+            labels_esti = labels
+
+
+    num_class, dim = labels_esti.max().item() + 1, features.shape[1]
+    smoothed_classifier = Smooth_Ber(model, num_class, dim, args.prob, sparse_mx_to_torch_sparse_tensor(adj).cuda(), features, args.cuda, labels_esti)
 
     f = open(args.certifyfile, 'w')
     print("idx\tlabel\tpredict\tpABar\tcorrect\tRx\tbest_fair_value\tcor_acc_value\ttime", file=f, flush=True)
@@ -253,7 +235,7 @@ def tst():
     pred_labels = output.argmax(1)
 
     parity, equality = fair_metric(pred_labels[idx_test].cpu().numpy(), labels[idx_test].cpu().numpy(),
-                                   sens[idx_test].numpy())
+                                   sens[idx_test].cpu().numpy())
 
 
     print("flagflag")
@@ -278,19 +260,12 @@ def tst():
 
 if __name__ == '__main__':
 
-    params = None 
-    with open('params.json', 'r', encoding='utf-8') as jsonf:
-        params = json.load(jsonf)
-
-    mp.set_start_method('spawn')
-    os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
     args = parser.parse_args()
     args.cuda = not args.no_cuda and torch.cuda.is_available()
     dataset_name = args.dataset
     dataset_gnn = "(" + args.dataset + ", " + args.gnn + ")"
-    args.seed = random.choice(params[args.threshold_flag][dataset_gnn][2])
+    args.seed = random.choice([1])
 
     random.seed(args.seed)
     os.environ['PYTHONHASHSEED'] =str(args.seed)
@@ -301,6 +276,9 @@ if __name__ == '__main__':
         torch.cuda.manual_seed_all(args.seed)
         torch.backends.cudnn.deterministic =True
 
+    os.makedirs('trained_gnns', exist_ok=True)
+
+
     adj, features, labels, idx_train, idx_val, idx_test, sens = None, None, None, None, None, None, None
     
     if args.dataset == 'credit':
@@ -309,8 +287,6 @@ if __name__ == '__main__':
     elif args.dataset == 'german':
         adj, features, labels, idx_train, idx_val, idx_test, sens = load_german()
         features = feature_norm(features)
-        args.training_noise_adj_std = 0.0002
-        args.training_noise_x_std = 1e-5
         args.vul_ratio = 0.05
         args.lr = 0.001
     elif args.dataset == 'bail':
@@ -320,12 +296,6 @@ if __name__ == '__main__':
         assert 1 == 0
 
 
-    args.prob = params[args.threshold_flag][dataset_gnn][0][0]
-    args.gaussian_std = params[args.threshold_flag][dataset_gnn][0][1]
-
-    adj_vnl, features, labels, idx_train, idx_val, idx_test, sens = adj, features, labels, idx_train, idx_val, idx_test, sens
-
-    print(adj_vnl.shape[0])
     print("CHECK   num of VUL  : "  + str(int(torch.randperm(int(idx_test.shape[0]))[:int(idx_test.shape[0] * args.test_ratio)].shape[0] * args.vul_ratio)))
 
     print(labels.sum())
@@ -344,13 +314,14 @@ if __name__ == '__main__':
     model = None
     if args.gnn == 'gcn':
         model = GCN(nfeat=features.shape[1], nhid=args.hidden, nclass=labels.max().item() + 1, dropout=args.dropout)
+        if args.dataset == 'credit':
+            args.gaussian_std = 5e1
+            args.prob = 0.8
     elif args.gnn == 'sage':
         model = SAGE(nfeat=features.shape[1], nhid=args.hidden, nclass=labels.max().item() + 1, dropout=args.dropout)
     elif args.gnn == 'jk':
         model = JK(nfeat=features.shape[1], nhid=args.hidden, nclass=labels.max().item() + 1, dropout=args.dropout)
         if args.dataset == 'credit':
-            args.training_noise_adj_std = 0.00
-            args.training_noise_x_std = 0.00
             args.lr = 0.1
     else:
         print("Not implemented.")
@@ -367,18 +338,19 @@ if __name__ == '__main__':
         idx_train = idx_train.cuda()
         idx_val = idx_val.cuda()
         idx_test = idx_test.cuda()
+        sens = sens.cuda()
+
 
     final_epochs = 0
     loss_val_global = 1e10
     features_noise = None
     starting = time.time()
-    for epoch in range(args.epochs):
 
-        adj = noise_adding(adj_vnl)
-        edge_index, _ = convert.from_scipy_sparse_matrix(adj)
+    edge_index, _ = convert.from_scipy_sparse_matrix(adj)
+    for epoch in range(args.epochs):
+    
         if args.cuda:
             edge_index = edge_index.cuda()
-
         features_noise = features
 
         loss_mid = train(epoch)
@@ -391,8 +363,7 @@ if __name__ == '__main__':
 
     ending = time.time()
     print("Time:", ending - starting, "s")
-    model = torch.load('trained_gnns/' + args.gnn + '_' + dataset_name + '.pth')
+    model = torch.load('trained_gnns/' + args.gnn + '_' + dataset_name + '.pth', weights_only=False)
     tst()
 
-    adj = adj_vnl
     certify()
