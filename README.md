@@ -6,7 +6,7 @@ This is the open-source code for KDD'26 Certified Defense on the Fairness of Gra
 
 ## 1.Environment
 
-Experiments are performed on an Nvidia RTX A6000 with Cuda 11.1. 
+Experiments are performed on an Nvidia RTX A6000 with Cuda 13.0.
 
 Dependencies can be found in requirements.txt.
 
