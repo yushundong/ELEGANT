@@ -21,7 +21,7 @@ We have three datasets for experiments, namely German Credit, Recidivism, and Cr
 ./effectiveness.sh
 ```
 
-As a alternative, directly run
+Alternatively, directly run
 
 ```
 python gnn_certification.py
