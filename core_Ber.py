@@ -1,5 +1,11 @@
 import torch
-from scipy.stats import norm, binom_test
+from scipy.stats import norm
+
+try:
+    from scipy.stats import binom_test  # SciPy < 1.11
+except ImportError:
+    from scipy.stats import binomtest as binom_test  # SciPy >= 1.11
+
 from scipy.special import comb
 import numpy as np
 from math import ceil
@@ -7,6 +13,7 @@ from statsmodels.stats.proportion import proportion_confint
 
 from torch.distributions.bernoulli import Bernoulli
 from tqdm import tqdm
+import builtins
 from utils import normalize, sparse_mx_to_torch_sparse_tensor
 import scipy.sparse as sp
 import numba as nb
@@ -14,17 +21,11 @@ from numba import cuda
 import time
 import torch.nn.functional as F
 import threading
-
-
 from joblib import Parallel, delayed
-
-
 import time
 import random
 import torch.multiprocessing as mp
 from torch.multiprocessing import Manager
-
-
 
 
 BASE = 100
@@ -34,10 +35,7 @@ BASE = 100
 def _tools_accelerated(adj, adj_noise, idx, mask):
 
     rand_inputs = torch.randint_like(adj[idx], low=0, high=2, device='cuda').squeeze().int()
-
     adj_noise[idx] = adj[idx] * mask + rand_inputs * (1 - mask)
-
-    # print('#nnz:', (adj_noise[idx] - adj[idx]).sum())
     adj_noise[:, idx] = adj_noise[idx]
 
     return adj_noise
@@ -56,11 +54,8 @@ def para(m, adj, idx, adj_noise, base_classifier, fea):
 
     global counts
 
-
     mask = m.sample(adj[idx].shape).squeeze(-1).int()
-
     rand_inputs = torch.randint_like(adj[idx], low=0, high=2, device='cuda').squeeze().int()
-
     adj_noise[idx] = adj[idx] * mask + rand_inputs * (1 - mask)
 
     adj_noise[:, idx] = adj_noise[idx]
@@ -71,13 +66,8 @@ def para(m, adj, idx, adj_noise, base_classifier, fea):
     prediction = predictions[idx]
     counts[prediction.cpu().numpy()] += 1
 
-    print(counts)
-
     return 0
 
-
-
-# normalize(adj_noise.cpu().numpy() + sp.eye(adj_noise.cpu().numpy().shape[0]))
 def normalize(mx):
     """Row-normalize sparse matrix"""
     rowsum = np.array(mx.sum(1))
@@ -147,76 +137,18 @@ def multi_threading_tst(result_queue, feature, adj_noise_sparse, gaussian_std, b
     return fair_results
 
 
-
-
-#  NNNew
-def sample_noise_gau_multi(feature, adj_noise_sparse, gaussian_std, base_classifier, idx, labels, sens, threshold, threshold_flag, num_x, alpha_x=0.2):
-
-
-
-    pool_batch = int(10)
-
-    result_queue = mp.Queue()
-    model = base_classifier
-    model.share_memory()
-    processes = []
-    for i in range(pool_batch):
-        p = mp.Process(target=multi_threading_tst, args=(result_queue, feature, adj_noise_sparse._indices(), gaussian_std, base_classifier, idx, labels, sens, threshold, threshold_flag, int(num_x/pool_batch),))
-        p.start()
-        processes.append(p)
-
-    results = [int(result_queue.get()) for _ in range(pool_batch)]
-
-    for p in processes:
-        p.join()
-
-
-    counts_inner_list = torch.FloatTensor(list([num_x - sum(results), sum(results)]))
-    print("CHECK:" + str(counts_inner_list))
-
-    NA = counts_inner_list.max().cpu().item()
-    pa_bar_from_x = proportion_confint(NA, num_x, alpha=2 * alpha_x, method="beta")[0]
-    radius_x = 0.5 * gaussian_std * (gaussianCDFInverse(pa_bar_from_x) - gaussianCDFInverse(1 - pa_bar_from_x))
-
-
-    # if random.random() < 0.2:
-    print("CHECK  pa_bar_from_x  :  " + str(pa_bar_from_x))
-    print("CHECK  radius_x  :  " + str(radius_x))
-
-    return sum(results), radius_x, pa_bar_from_x
-
-
-
-
-
-
-
-
-#  NNNew
 def sample_noise_gau(feature, adj_noise_sparse, gaussian_std, base_classifier, idx, labels, sens, threshold, threshold_flag, num_x, idx_vul, alpha_x=0.3):
 
     counts_inner = 0
-
     fairness_level_best = 1.0
-
     corresponding_acc = -1.0
 
-
-    for _ in tqdm(range(num_x)):
+    for _ in range(num_x):
         feature_with_noise = feature.clone().detach()
         feature_with_noise[idx_vul, :] = feature[idx_vul, :] + gaussian_std * torch.randn(feature.shape[0], feature.shape[1]).cuda()[idx_vul, :]
         predictions = base_classifier(feature_with_noise, adj_noise_sparse._indices())
-
-        # nll_loss
         pred_labels = predictions.argmax(1)
-
-        # print(pred_labels.sum())
-
-        # print("************  CHECKING  **************")
-        # print(pred_labels[idx])
         fairness_classification, fairness_value = fair_judgement(pred_labels[idx], labels[idx], sens[idx], threshold, threshold_flag)
-
-        # print("************  CHECKING ENDS  **************")
         counts_inner += int(fairness_classification)
 
         if fairness_value < fairness_level_best:
@@ -230,12 +162,12 @@ def sample_noise_gau(feature, adj_noise_sparse, gaussian_std, base_classifier, i
 
     radius_x = 0.5 * gaussian_std * (gaussianCDFInverse(pa_bar_from_x) - gaussianCDFInverse(1 - pa_bar_from_x))
 
-    print("Check 0 NA : " + str(NA))
-    print("Check 1 pa_bar_from_x : " + str(pa_bar_from_x))
-    print("Check 2 radius_x : " + str(radius_x))
-    print("Check 3 fairness_level_best : " + str(fairness_level_best))
-    print("Check 4 corresponding_acc : " + str(corresponding_acc))
-    print("Check 5 vul num : " + str(idx_vul.shape))
+    # print("Check 0 NA : " + str(NA))
+    # print("Check 1 pa_bar_from_x : " + str(pa_bar_from_x))
+    # print("Check 2 radius_x : " + str(radius_x))
+    # print("Check 3 fairness_level_best : " + str(fairness_level_best))
+    # print("Check 4 corresponding_acc : " + str(corresponding_acc))
+    # print("Check 5 vul num : " + str(idx_vul.shape))
 
     return counts_inner, radius_x, pa_bar_from_x, fairness_level_best, corresponding_acc
 
@@ -275,10 +207,6 @@ class Smooth_Ber(object):
         label_1 = self.labels.sum()
 
         self.indices = None
-
-        print(label_0)
-        print(label_1)
-        print(torch.nonzero(1 - self.labels).squeeze().cpu().numpy())
 
         if label_0 > label_1:
             self.indices = np.random.choice(torch.nonzero(1 - self.labels).squeeze().cpu().numpy().tolist(), size=int(label_0 - label_1), replace=False)
@@ -334,10 +262,13 @@ class Smooth_Ber(object):
 
 
         self.base_classifier.eval()
+        tqdm.write("Determine the predicted class:")
         # draw samples of f(x+ epsilon)
         counts_selection, _, _, _ = self._sample_noise_ber(idx, n0, n0, gaussian_std, labels, sens, threshold, threshold_flag, idx_vul)
         # use these samples to take a guess at the top class
         cAHat = counts_selection.argmax().item()
+
+        tqdm.write("Certify the predicted class:")
         # draw more samples of f(x + epsilon)
         counts_estimation, Rx, best_fair_value, cor_acc_value = self._sample_noise_ber(idx, n, num_x, gaussian_std, labels, sens, threshold, threshold_flag, idx_vul)
         
@@ -378,7 +309,9 @@ class Smooth_Ber(object):
             best_fair = []
             cor_acc = []
 
-            for _ in tqdm(range(num)):
+            pbar = tqdm(range(num), dynamic_ncols=True)
+
+            for _ in pbar:
 
                 random_noise = self.m.sample(adj[idx_vul].shape).squeeze(-1).int()
 
@@ -414,14 +347,15 @@ class Smooth_Ber(object):
                     best_fair.append(1e3)
                     cor_acc.append(corresponding_acc)
 
-
-
                 counts[int(fairness_certify_x)] += the_one
 
-                print(counts)
-                print(" **** Check 0 min(best_fair) : " + str(min(best_fair)))
-                print(" **** Check 1 cor_acc : " + str(cor_acc[np.array(best_fair).argmin()]))
-                print(" **** Check 2 Rx : " + str(Rx))
+                # print(" **** Check 0 min(best_fair) : " + str(min(best_fair)))
+                # print(" **** Check 1 cor_acc : " + str(cor_acc[np.array(best_fair).argmin()]))
+                # print(" **** Check 2 Rx : " + str(Rx))
+                if num == 200: pbar.set_postfix(min_fair=f"{min(best_fair):.4f}", acc=f"{cor_acc[np.array(best_fair).argmin()]:.4f}", Rx=f"{Rx:.4f}")
+
+
+
 
             return counts.cpu().numpy(), Rx, min(best_fair), cor_acc[np.array(best_fair).argmin()]
 
