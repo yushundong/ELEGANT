@@ -1,6 +1,7 @@
 from __future__ import division
 from __future__ import print_function
-
+import warnings
+warnings.filterwarnings("ignore")
 import os
 import json
 from torch_geometric.utils import convert
@@ -13,15 +14,12 @@ import torch.optim as optim
 from utils import load_bail, load_credit, load_german
 from GNNs import GCN, SAGE, JK
 from tqdm import tqdm
-import warnings
-warnings.filterwarnings('ignore')
 from core_Ber import Smooth_Ber
 import datetime
-from utils import load_data, load_data_new, accuracy, normalize, sparse_mx_to_torch_sparse_tensor
+from utils import load_data, accuracy, normalize, sparse_mx_to_torch_sparse_tensor
 import random
 import scipy as sp
 from scipy import sparse
-
 from torch.distributions.bernoulli import Bernoulli
 import torch.multiprocessing as mp
 
@@ -64,7 +62,7 @@ parser.add_argument("--test_ratio", type=float, default=0.9, help="from 0 to 1")
 parser.add_argument("--sample_times", type=int, default=100, help="sample how many sets of nodes out of test set for certificatio")
 parser.add_argument("--num_x", type=int, default=150, help="number of samples to use for inner x loop")
 parser.add_argument('--dataset', type=str, default="german", help='credit german bail google')
-parser.add_argument("--gnn", type=str, default='gcn', help="a GNN in jk, gcn, and sage")  
+parser.add_argument("--gnn", type=str, default='sage', help="a GNN in jk, gcn, and sage")  
 parser.add_argument('--prob', default=0.6, type=float, help="probability to keep the status for each binary entry")
 parser.add_argument("--gaussian_std", type=float, default=5e0, help="Gaussian std to use for inner x loop")
 parser.add_argument("--training_noise_x_std", type=float, default=0.0, help="Change prob in adj matrix during training process")
@@ -134,8 +132,6 @@ def filtering(adj, features, labels, idx_train, idx_val, idx_test, sens):
 
 
 def certify():
-
-    print("CHECK   num of VUL  : "  + str(int(torch.randperm(int(idx_test.shape[0]))[:int(idx_test.shape[0] * args.test_ratio)].shape[0] * args.vul_ratio)))
 
     labels_esti_path = './labels_esti.pt'  # necessary when args.threshold_flag == 'equality'
 
@@ -214,12 +210,12 @@ def train(epoch):
 
     loss_val = F.nll_loss(F.log_softmax(output[idx_val], dim=1), labels[idx_val])
     acc_val = accuracy_new(output[idx_val], labels[idx_val])
-    print('Epoch: {:04d}'.format(epoch+1),
-          'loss_train: {:.4f}'.format(loss_train.item()),
-          'acc_train: {:.4f}'.format(acc_train.item()),
-          'loss_val: {:.4f}'.format(loss_val.item()),
-          'acc_val: {:.4f}'.format(acc_val.item()),
-          'time: {:.4f}s'.format(time.time() - t))
+    # print('Epoch: {:04d}'.format(epoch+1),
+    #       'loss_train: {:.4f}'.format(loss_train.item()),
+    #       'acc_train: {:.4f}'.format(acc_train.item()),
+    #       'loss_val: {:.4f}'.format(loss_val.item()),
+    #       'acc_val: {:.4f}'.format(acc_val.item()),
+    #       'time: {:.4f}s'.format(time.time() - t))
 
     return loss_val.item()
 
@@ -229,19 +225,10 @@ def tst():
     loss_test = F.nll_loss(F.log_softmax(output[idx_test], dim=1), labels[idx_test])
     acc_test = accuracy_new(output[idx_test], labels[idx_test])
 
-    print(output[idx_test])
-    print(labels[idx_test])
-
     pred_labels = output.argmax(1)
 
     parity, equality = fair_metric(pred_labels[idx_test].cpu().numpy(), labels[idx_test].cpu().numpy(),
                                    sens[idx_test].cpu().numpy())
-
-
-    print("flagflag")
-
-    print(pred_labels.sum())
-    print(pred_labels.shape[0])
 
     print("Test set results:",
           "loss= {:.4f}".format(loss_test.item()),
@@ -295,28 +282,14 @@ if __name__ == '__main__':
         print('Not implemented.')
         assert 1 == 0
 
-
-    print("CHECK   num of VUL  : "  + str(int(torch.randperm(int(idx_test.shape[0]))[:int(idx_test.shape[0] * args.test_ratio)].shape[0] * args.vul_ratio)))
-
-    print(labels.sum())
-    print(labels.shape[0] - labels.sum())
-
-    print(labels[idx_train].sum())
-    print(labels[idx_train].shape[0] - labels[idx_train].sum())
-
-    print(labels[idx_val].sum())
-    print(labels[idx_val].shape[0] - labels[idx_val].sum())
-
-    print(labels[idx_test].sum())
-    print(labels[idx_test].shape[0] - labels[idx_test].sum())
-
-
     model = None
     if args.gnn == 'gcn':
         model = GCN(nfeat=features.shape[1], nhid=args.hidden, nclass=labels.max().item() + 1, dropout=args.dropout)
         if args.dataset == 'credit':
             args.gaussian_std = 5e1
             args.prob = 0.8
+        elif args.dataset == 'german':
+            args.gaussian_std = 8e0
     elif args.gnn == 'sage':
         model = SAGE(nfeat=features.shape[1], nhid=args.hidden, nclass=labels.max().item() + 1, dropout=args.dropout)
     elif args.gnn == 'jk':
@@ -347,7 +320,7 @@ if __name__ == '__main__':
     starting = time.time()
 
     edge_index, _ = convert.from_scipy_sparse_matrix(adj)
-    for epoch in range(args.epochs):
+    for epoch in tqdm(range(args.epochs)):
     
         if args.cuda:
             edge_index = edge_index.cuda()
@@ -357,7 +330,6 @@ if __name__ == '__main__':
         if loss_mid < loss_val_global:
             loss_val_global = loss_mid
             torch.save(model, 'trained_gnns/' + args.gnn + '_' + dataset_name + '.pth')
-            print("Saved!")
             final_epochs = epoch
 
 
