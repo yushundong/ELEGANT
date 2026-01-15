@@ -4,8 +4,6 @@ import argparse
 import os
 import json
 from decimal import Decimal
-from numba import jit, njit
-from numba.typed import List
 from time import time
 from multiprocessing import Pool
 
@@ -48,7 +46,7 @@ def certify_K(args):
 				break
 		q_given_lower /= total_Z
 
-		# sort likelihood ratio in a ascending order
+		# sort likelihood ratio in an ascending order
 		p_given_upper = 0
 		q_given_upper = 0
 		# print('Begin Backward...')
