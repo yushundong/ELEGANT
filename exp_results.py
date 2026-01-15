@@ -2,8 +2,7 @@ import os
 import fnmatch
 import pandas as pd
 import numpy as np
-# from certify_K import certify_K
-from certify_K_fast import certify_K
+from certify_K import certify_K
 from operator import itemgetter
 import glob
 
